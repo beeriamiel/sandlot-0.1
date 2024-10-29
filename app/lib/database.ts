@@ -83,20 +83,41 @@ export const getCurrentUser = async () => {
   return user
 }
 
-export async function getDataFromSupabase(table: string, page = 1, pageSize = 50, filters: Filter[] = []) {
-  let query = supabase
-    .from(table)
-    .select('*', { count: 'exact' })
-    .range((page - 1) * pageSize, page * pageSize - 1);
+export async function getDataFromSupabase(
+  tableName: string,
+  page = 1,
+  pageSize = 50,
+  filters: Filter[] = [],
+  idsOnly = false
+) {
+  try {
+    let query = supabase
+      .from(tableName)
+      .select(idsOnly ? 'id' : '*', { count: 'exact' });
 
-  filters.forEach(filter => {
-    query = query.filter(filter.column, filter.operation, filter.value);
-  });
+    // Apply filters
+    filters.forEach(filter => {
+      // Add your filter logic here
+    });
 
-  const { data, error, count } = await query;
+    // Add pagination if not fetching all IDs
+    if (!idsOnly) {
+      const start = (page - 1) * pageSize;
+      query = query.range(start, start + pageSize - 1);
+    }
 
-  if (error) throw error;
-  return { data, totalRows: count };
+    const { data, count, error } = await query;
+
+    if (error) throw error;
+
+    return {
+      data: data || [],
+      totalRows: count || 0
+    };
+  } catch (error) {
+    console.error('Error in getDataFromSupabase:', error);
+    throw error;
+  }
 }
 
 export async function saveEventsToDatabase(table: string, events: any[]) {

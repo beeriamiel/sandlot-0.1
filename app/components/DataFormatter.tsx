@@ -94,7 +94,43 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
   // Add new state for tracking check all scope
   const [checkAllScope, setCheckAllScope] = useState<'page' | 'all'>('page');
 
-  // Add this function back
+  // Add this new function after the component declaration but before other functions
+  const toggleAllRowsInDatabase = async (checked: boolean) => {
+    if (!selectedTable) return;
+    
+    try {
+      // Fetch all row IDs from the database
+      const { data: allIds } = await getDataFromSupabase(
+        selectedTable, 
+        1, 
+        Number.MAX_SAFE_INTEGER, 
+        filters,
+        true // Add this parameter to your getDataFromSupabase function to only fetch IDs
+      );
+      
+      if (!Array.isArray(allIds)) return;
+      
+      // Update the data state with all rows checked/unchecked
+      setData(prevData => {
+        const idSet = new Set(allIds.map(row => row.id));
+        return prevData.map(row => ({
+          ...row,
+          checked: idSet.has(row.id) ? checked : row.checked
+        }));
+      });
+      
+      // Update totalChecked count
+      setTotalChecked(checked ? allIds.length : 0);
+    } catch (error) {
+      console.error('Error toggling all rows:', error);
+      alert('Failed to toggle all rows. Please try again.');
+    }
+  };
+
+  // Add this new state
+  const [totalChecked, setTotalChecked] = useState(0);
+
+  // Add this function
   const fetchSavedFormats = useCallback(async () => {
     try {
       const formats = await getSavedFormatsFromSupabase();
@@ -190,7 +226,10 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
     try {
       const { data: fetchedData, totalRows: total } = await getDataFromSupabase(selectedTable, currentPage, ROWS_PER_PAGE, filters);
       if (Array.isArray(fetchedData)) {
-        setData(fetchedData.map((row: DataRow) => ({ ...row, checked: false })));
+        setData(fetchedData.map((row: DataRow) => ({ 
+          ...row, 
+          checked: allChecked // Maintain checked state based on allChecked
+        })));
         setTotalRows(total || 0);
       } else {
         console.error('Fetched data is not an array:', fetchedData);
@@ -201,7 +240,7 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
       console.error('Error fetching data:', error);
       alert('Failed to fetch data. Please try again.');
     }
-  }, [selectedTable, currentPage, filters]);
+  }, [selectedTable, currentPage, filters, allChecked]); // Add allChecked to dependencies
 
   const runFormatting = async () => {
     setIsFormatting(true);
@@ -362,7 +401,8 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
     }
   };
 
-  const toggleAllChecked = useCallback(() => {
+  // Update the toggleAllChecked function
+  const toggleAllChecked = useCallback(async () => {
     const newAllChecked = !allChecked;
     setAllChecked(newAllChecked);
 
@@ -375,19 +415,30 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
         ...row,
         checked: index >= startIndex && index < endIndex ? newAllChecked : row.checked
       })));
+      
+      // Update totalChecked for current page
+      setTotalChecked(prev => {
+        const currentPageChecked = ROWS_PER_PAGE * (newAllChecked ? 1 : 0);
+        const otherPagesChecked = prev - (ROWS_PER_PAGE * (allChecked ? 1 : 0));
+        return Math.max(0, currentPageChecked + otherPagesChecked);
+      });
     } else {
       // Update all pages
-      setData(prevData => prevData.map(row => ({
-        ...row,
-        checked: newAllChecked
-      })));
+      await toggleAllRowsInDatabase(newAllChecked);
     }
-  }, [allChecked, checkAllScope, currentPage]);
+  }, [allChecked, checkAllScope, currentPage, selectedTable, filters]);
 
+  // Update the toggleRowChecked function
   const toggleRowChecked = (index: number) => {
-    setData(prev => prev.map((row, i) => 
-      i === index ? { ...row, checked: !row.checked } : row
-    ));
+    setData(prev => prev.map((row, i) => {
+      if (i === index) {
+        const newChecked = !row.checked;
+        // Update totalChecked when individual row is toggled
+        setTotalChecked(prev => prev + (newChecked ? 1 : -1));
+        return { ...row, checked: newChecked };
+      }
+      return row;
+    }));
   };
 
   const handleUploadClick = () => {
@@ -590,6 +641,15 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
 
   // Update the pagination section to handle undefined totalRows
   const totalPages = Math.max(1, Math.ceil(totalRows / ROWS_PER_PAGE));
+
+  // Add this effect to update allChecked state based on totalChecked
+  useEffect(() => {
+    if (dataSource === 'supabase') {
+      setAllChecked(totalChecked === totalRows);
+    } else {
+      setAllChecked(totalChecked === data.length);
+    }
+  }, [totalChecked, totalRows, data.length, dataSource]);
 
   return (
     <Layout>
