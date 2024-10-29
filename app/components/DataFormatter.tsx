@@ -62,35 +62,11 @@ interface UpdatedRow extends DataRow {
 }
 
 export default function DataFormatter({ initialData = [] }: DataFormatterProps) {
-  const [data, setData] = useState<DataRow[]>(() => {
-    if (typeof window !== 'undefined') {
-      const savedData = localStorage.getItem('dataFormatterRows');
-      return savedData ? JSON.parse(savedData) : [];
-    }
-    return [];
-  });
-
+  const [data, setData] = useState<DataRow[]>([]);
   const [totalRows, setTotalRows] = useState(0);
-  const [currentPage, setCurrentPage] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return parseInt(localStorage.getItem('dataFormatterCurrentPage') || '1', 10);
-    }
-    return 1;
-  });
-  const [filters, setFilters] = useState<Filter[]>(() => {
-    if (typeof window !== 'undefined') {
-      const savedFilters = localStorage.getItem('dataFormatterFilters');
-      return savedFilters ? JSON.parse(savedFilters) : [];
-    }
-    return [];
-  });
-  const [columnFormatting, setColumnFormatting] = useState<Record<string, ColumnFormatting>>(() => {
-    if (typeof window !== 'undefined') {
-      const savedFormatting = localStorage.getItem('dataFormatterColumnFormatting');
-      return savedFormatting ? JSON.parse(savedFormatting) : {};
-    }
-    return {};
-  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [filters, setFilters] = useState<Filter[]>([]);
+  const [columnFormatting, setColumnFormatting] = useState<Record<string, ColumnFormatting>>({});
   const [isFormatting, setIsFormatting] = useState(false);
   const [dataSource, setDataSource] = useState<'csv' | 'supabase' | 'eventSpreadsheet' | null>(null);
   const [allChecked, setAllChecked] = useState(false);
@@ -212,10 +188,10 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
     if (!selectedTable) return;
 
     try {
-      const { data: fetchedData, totalRows } = await getDataFromSupabase(selectedTable, currentPage, ROWS_PER_PAGE, filters);
+      const { data: fetchedData, totalRows: total } = await getDataFromSupabase(selectedTable, currentPage, ROWS_PER_PAGE, filters);
       if (Array.isArray(fetchedData)) {
         setData(fetchedData.map((row: DataRow) => ({ ...row, checked: false })));
-        setTotalRows(totalRows || 0);
+        setTotalRows(total || 0);
       } else {
         console.error('Fetched data is not an array:', fetchedData);
         setData([]);
@@ -366,13 +342,13 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
     }
     try {
       await checkAuthStatus(); // Ensure user is authenticated
-      const fetchedData = await getDataFromSupabase(selectedTable);
+      const { data: fetchedData, totalRows: total } = await getDataFromSupabase(selectedTable);
       if (Array.isArray(fetchedData) && fetchedData.length > 0) {
         const newData = fetchedData.map((row: DataRow) => ({ ...row, checked: false }));
         setData(newData);
         setDataSource('supabase');
         setCurrentPage(1);
-        setTotalRows(newData.length);
+        setTotalRows(total || newData.length);
         alert(`Data successfully fetched from Supabase table: ${selectedTable}`);
         if (newData.length > 10000) {
           alert('Warning: Large dataset detected. Performance may be affected.');
@@ -541,7 +517,7 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
           const headers = rows[0];
           const dataRows = rows.slice(1).map((row, index) => {
             const dataRow: DataRow = {
-              id: index + 1, // Generate an id for each row
+              id: index + 1,
               checked: false
             };
             headers.forEach((header, idx) => {
@@ -597,6 +573,23 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
       localStorage.removeItem('dataFormatterCurrentPage');
     }
   };
+
+  // Add this useEffect to handle client-side initialization
+  useEffect(() => {
+    // Only run on client-side after initial render
+    const savedData = localStorage.getItem('dataFormatterRows');
+    const savedPage = localStorage.getItem('dataFormatterCurrentPage');
+    const savedFilters = localStorage.getItem('dataFormatterFilters');
+    const savedFormatting = localStorage.getItem('dataFormatterColumnFormatting');
+
+    if (savedData) setData(JSON.parse(savedData));
+    if (savedPage) setCurrentPage(parseInt(savedPage, 10));
+    if (savedFilters) setFilters(JSON.parse(savedFilters));
+    if (savedFormatting) setColumnFormatting(JSON.parse(savedFormatting));
+  }, []); // Empty dependency array means this runs once after mount
+
+  // Update the pagination section to handle undefined totalRows
+  const totalPages = Math.max(1, Math.ceil(totalRows / ROWS_PER_PAGE));
 
   return (
     <Layout>
@@ -829,17 +822,17 @@ export default function DataFormatter({ initialData = [] }: DataFormatterProps) 
           <div className="flex justify-center items-center space-x-2 mt-4">
             <Button 
               onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} 
-              disabled={currentPage === 1}
+              disabled={currentPage <= 1}
               variant="outline"
             >
               Previous
             </Button>
             <span className="py-2">
-              Page {currentPage} of {Math.ceil(totalRows / ROWS_PER_PAGE)}
+              Page {currentPage} of {totalPages}
             </span>
             <Button 
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(totalRows / ROWS_PER_PAGE)))} 
-              disabled={currentPage === Math.ceil(totalRows / ROWS_PER_PAGE)}
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} 
+              disabled={currentPage >= totalPages}
               variant="outline"
             >
               Next
